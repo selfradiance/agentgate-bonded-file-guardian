@@ -27,7 +27,10 @@ git clone https://github.com/selfradiance/agent-002-file-guardian.git
 cd agent-002-file-guardian
 npm install
 
-# Run the guardian
+# Watch a TypeScript project — restore any change that breaks the build
+npx tsx src/index.ts ./src --verify-cmd 'tsc --noEmit' --api-key YOUR_AGENTGATE_REST_KEY
+
+# Or watch any directory with the default size-threshold verification
 npx tsx src/index.ts /path/to/directory --api-key YOUR_AGENTGATE_REST_KEY
 ```
 
@@ -46,10 +49,28 @@ npx tsx src/index.ts <directory> [options]
 
 The `--agentgate-url` flag also accepts `https://agentgate.run` — a live demo instance available until approximately March 2027.
 
+## What Happens When a Change Is Caught
+
+```
+[14:32:01] [change] Change detected: db.ts
+[14:32:01] [error]  Bond lifecycle failed for db.ts: fetch failed: ECONNREFUSED
+[14:32:01] [failed] db.ts: AgentGate unreachable — change reverted (fail-closed)
+```
+
+```
+[14:35:12] [change] Change detected: config.ts
+[14:35:14] [failed] config.ts: Command failed (exit 1): tsc --noEmit — error TS2322: Type 'string' is not assignable to type 'number'. — restored from snapshot
+```
+
+```
+[14:36:44] [change] Change detected: utils.ts
+[14:36:46] [passed] utils.ts: Command passed: tsc --noEmit
+```
+
 ## What It Watches For
 
-- **File modifications:** checks that the file wasn't emptied and the size didn't change beyond the configured threshold
-- **File deletions:** automatically caught and restored from snapshot
+- **File modifications:** runs the verify command (if configured) or checks that the file wasn't emptied and the size didn't change beyond the threshold
+- **File deletions:** automatically caught and restored from snapshot — no verification needed, deletions always fail
 - **What it does NOT watch:** new file creation, subdirectories, or files added after startup
 
 ## Safety Features
