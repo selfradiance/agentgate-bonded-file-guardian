@@ -208,10 +208,10 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
     justRestored.add(filePath);
     try {
       restoreSnapshot(filePath);
+      log("restored", `${filename}: Deleted file restored from snapshot`);
     } catch (err) {
       log("error", `Failed to restore deleted ${filename} from snapshot: ${err instanceof Error ? err.message : String(err)}`);
     }
-    log("restored", `${filename}: Deleted file restored from snapshot`);
   }
 
   // Start chokidar — ignoreInitial skips the 'add' events at startup
