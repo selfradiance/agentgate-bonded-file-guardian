@@ -64,6 +64,9 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
     return last !== undefined && now - last < DEFAULT_CONFIG.debounceMs;
   }
 
+  // Restore-echo suppression — skip the chokidar event triggered by our own restore
+  const justRestored = new Set<string>();
+
   // Bond lifecycle helper — posts bond, executes action, returns actionId.
   // Returns null if AgentGate calls fail (graceful degradation).
   async function tryBondLifecycle(filePath: string, action: string): Promise<string | null> {
@@ -89,6 +92,13 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
   // Handle file modification
   async function handleChange(filePath: string): Promise<void> {
     if (isDuplicate(filePath)) return;
+
+    // Skip events triggered by our own restore writes
+    if (justRestored.has(filePath)) {
+      justRestored.delete(filePath);
+      log("skip", `Restore echo skipped: ${path.basename(filePath)}`);
+      return;
+    }
 
     // Skip symlinks — they could point outside the watched directory
     try {
@@ -119,6 +129,7 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
       log("passed", `${filename}: ${result.reason}`);
     } else {
       await tryResolve(actionId, false);
+      justRestored.add(filePath);
       restoreSnapshot(filePath);
       log("failed", `${filename}: ${result.reason} — restored from snapshot`);
     }
@@ -138,6 +149,7 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
 
     const actionId = await tryBondLifecycle(filePath, "delete");
     await tryResolve(actionId, false);
+    justRestored.add(filePath);
     restoreSnapshot(filePath);
     log("restored", `${filename}: Deleted file restored from snapshot`);
   }

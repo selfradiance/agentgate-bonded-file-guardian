@@ -179,4 +179,33 @@ describe("watcher", () => {
     expect(errorEvent!.detail).toContain("AgentGate unreachable");
     expect(fs.readFileSync(file, "utf8")).toBe("precious data");
   });
+
+  it("restore-triggered chokidar event does not post a second bond", async () => {
+    const file = path.join(tmpDir, "restore-echo.txt");
+    fs.writeFileSync(file, "original");
+
+    handle = await startWatcher({
+      directory: tmpDir,
+      agentGateUrl: "http://fake",
+      apiKey: "fake",
+      onEvent,
+    });
+
+    // Clear mock call counts from startup
+    vi.mocked(bonds.postBond).mockClear();
+
+    // Empty the file — verification fails, file is restored
+    fs.writeFileSync(file, "");
+    await waitForEvent(events, "failed");
+
+    // Wait long enough for chokidar to fire the restore echo event (if any)
+    await new Promise((r) => setTimeout(r, 500));
+
+    // File should be restored to original content
+    expect(fs.readFileSync(file, "utf8")).toBe("original");
+
+    // postBond should only have been called ONCE (for the original change)
+    // The restore echo is suppressed by either debounce (fast mocks) or justRestored set (real AgentGate)
+    expect(vi.mocked(bonds.postBond).mock.calls.length).toBe(1);
+  });
 });
