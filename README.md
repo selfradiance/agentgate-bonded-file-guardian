@@ -51,10 +51,17 @@ The `--agentgate-url` flag also accepts `https://agentgate.run` — a live demo 
 
 ## Safety Features
 
+- **Fail-closed by default** — if AgentGate is unreachable, changes are reverted from snapshot. Use `--fail-open` to override.
 - **Symlinks skipped** — symlinks in the watched directory are detected and ignored, preventing the guardian from reading or writing outside the directory
 - **Restore-echo suppression** — when the guardian restores a file, the resulting filesystem event is suppressed so it doesn't waste a bond re-checking its own restore
+- **Atomic restores** — restored files are written to a temp file first, then atomically renamed into place. A crash mid-restore won't corrupt the original.
+- **Per-file locking** — concurrent changes to the same file are serialized, preventing race conditions in the bond/verify/restore cycle
 - **10-second request timeout** — all AgentGate API calls time out after 10 seconds, so the guardian doesn't hang if AgentGate is unreachable
-- **Threshold validation** — invalid CLI threshold values (NaN, negative) are rejected at startup with a clear error
+- **Input validation** — invalid CLI values (NaN thresholds, bad timeout values) are rejected at startup with clear errors
+
+## Trust Model
+
+The `--verify-cmd` flag runs an arbitrary shell command via `/bin/sh`. This is a deliberate design choice — the guardian's operator specifies the command, and it runs with the same permissions as the guardian process. Do not source the `--verify-cmd` value from untrusted input (e.g., user-facing config files or environment variables set by other processes). The trust boundary is the same as a `Makefile` target or an npm script.
 
 ## Tests
 
@@ -62,7 +69,7 @@ The `--agentgate-url` flag also accepts `https://agentgate.run` — a live demo 
 npm test
 ```
 
-39 tests across 5 test files (snapshots, verification, bonds, watcher, integration).
+50 tests across 5 test files (snapshots, verification, bonds, watcher, integration).
 
 Integration tests require a running AgentGate instance:
 

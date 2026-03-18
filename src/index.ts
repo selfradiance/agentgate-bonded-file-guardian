@@ -69,6 +69,12 @@ async function main() {
     console.warn("Warning: threshold greater than 1000% means files can change dramatically without triggering — this is very permissive");
   }
 
+  // Validate verify timeout
+  if (!Number.isFinite(verifyCmdTimeoutMs) || verifyCmdTimeoutMs <= 0) {
+    console.error("Error: Invalid verify-timeout value — must be a positive number of seconds");
+    process.exit(1);
+  }
+
   if (!directory) {
     console.error("Usage: npx tsx src/index.ts <directory> [options]");
     console.error("");
