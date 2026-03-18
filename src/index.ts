@@ -45,6 +45,18 @@ function parseArgs(argv: string[]): {
 async function main() {
   const { directory, agentGateUrl, apiKey, sizeChangeThreshold } = parseArgs(process.argv);
 
+  // Validate threshold
+  if (!Number.isFinite(sizeChangeThreshold) || sizeChangeThreshold < 0) {
+    console.error("Error: Invalid threshold value — must be a positive number (e.g., 50 for 50%)");
+    process.exit(1);
+  }
+  if (sizeChangeThreshold === 0) {
+    console.warn("Warning: threshold 0 means ANY size change will trigger a slash — this is almost certainly not what you want");
+  }
+  if (sizeChangeThreshold > 10) {
+    console.warn("Warning: threshold greater than 1000% means files can change dramatically without triggering — this is very permissive");
+  }
+
   if (!directory) {
     console.error("Usage: npx tsx src/index.ts <directory> [options]");
     console.error("");
