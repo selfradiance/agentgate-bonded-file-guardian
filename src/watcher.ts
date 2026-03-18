@@ -250,6 +250,7 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
   return {
     stop: async () => {
       await watcher.close();
+      await Promise.all([...fileLocks.values()]);
       log("stopped", "Watcher stopped");
     },
   };
