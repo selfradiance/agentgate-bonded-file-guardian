@@ -1,6 +1,6 @@
 {
   "name": "agent-002-file-guardian",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A bonded file guardian that watches a directory and enforces accountability on file changes through AgentGate",
   "author": "selfradiance",
   "license": "MIT",

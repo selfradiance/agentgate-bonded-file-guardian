@@ -13,7 +13,7 @@ AI coding agents are being given filesystem access with zero accountability. A d
 1. The guardian starts and snapshots every file in the watched directory
 2. A file change is detected (modification or deletion)
 3. A bond is posted to AgentGate (the agent puts up collateral)
-4. Verification runs: does the file still exist? Is it non-empty? Is the size change within the threshold?
+4. Verification runs: either a user-supplied command (`--verify-cmd`, exit 0 = pass) or the default size-threshold check (file exists, not empty, size within threshold)
 5. If verification passes → bond released, snapshot updated to the new file state
 6. If verification fails → bond slashed, file restored from the pre-change snapshot
 
@@ -39,6 +39,9 @@ npx tsx src/index.ts <directory> [options]
   --agentgate-url <url>   AgentGate server URL (default: http://127.0.0.1:3000)
   --api-key <key>         AgentGate REST key (or set AGENTGATE_REST_KEY env var)
   --threshold <percent>   Max allowed size change % (default: 50)
+  --verify-cmd <command>  Shell command to run for verification (exit 0 = pass)
+  --verify-timeout <sec>  Timeout for verify command in seconds (default: 30)
+  --fail-open             Allow changes through when AgentGate is unreachable (default: fail-closed)
 ```
 
 The `--agentgate-url` flag also accepts `https://agentgate.run` — a live demo instance available until approximately March 2027.
