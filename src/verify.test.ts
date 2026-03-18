@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { verifyChange } from "./verify";
+import { verifyChange, verifyCommand } from "./verify";
 
 describe("verifyChange", () => {
   let tmpDir: string;
@@ -77,5 +77,57 @@ describe("verifyChange", () => {
     const result = verifyChange(file, 13, 0.5);
     expect(result.passed).toBe(true);
     expect(result.reason).toBe("All checks passed");
+  });
+});
+
+describe("verifyCommand", () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "guardian-cmd-"));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("passes when command exits 0", () => {
+    const result = verifyCommand("true", tmpDir, 5000);
+    expect(result.passed).toBe(true);
+    expect(result.reason).toContain("Command passed");
+  });
+
+  it("fails when command exits non-zero", () => {
+    const result = verifyCommand("false", tmpDir, 5000);
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain("Command failed");
+    expect(result.reason).toContain("exit");
+  });
+
+  it("fails with stderr detail when command produces error output", () => {
+    const result = verifyCommand("echo 'type error on line 5' >&2 && exit 1", tmpDir, 5000);
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain("type error on line 5");
+  });
+
+  it("fails when command times out", () => {
+    const result = verifyCommand("sleep 10", tmpDir, 500); // 500ms timeout
+    expect(result.passed).toBe(false);
+    expect(result.reason).toContain("timed out");
+  });
+
+  it("runs with watched directory as cwd", () => {
+    // Create a file in the temp dir, then verify a command that checks for it
+    fs.writeFileSync(path.join(tmpDir, "marker.txt"), "exists");
+    const result = verifyCommand("test -f marker.txt", tmpDir, 5000);
+    expect(result.passed).toBe(true);
+  });
+
+  it("falls back to size threshold when no command specified (integration check)", () => {
+    // This test confirms the existing verifyChange still works as the fallback
+    const file = path.join(tmpDir, "fallback.txt");
+    fs.writeFileSync(file, "hello world");
+    const result = verifyChange(file, 11, 0.5);
+    expect(result.passed).toBe(true);
   });
 });

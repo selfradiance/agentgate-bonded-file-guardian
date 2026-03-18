@@ -3,7 +3,7 @@ import path from "node:path";
 import { watch, type FSWatcher } from "chokidar";
 import { DEFAULT_CONFIG } from "./config";
 import { snapshotAll, hasSnapshot, getSnapshotSize, restoreSnapshot, takeSnapshot } from "./snapshots";
-import { verifyChange } from "./verify";
+import { verifyChange, verifyCommand } from "./verify";
 import { registerAgent, postBond, executeBondedAction, resolveBond, generateKeypair, type AgentKeys } from "./bonds";
 
 export interface WatcherOptions {
@@ -11,6 +11,8 @@ export interface WatcherOptions {
   agentGateUrl?: string;
   apiKey?: string;
   sizeChangeThreshold?: number;
+  verifyCmd?: string;
+  verifyCmdTimeoutMs?: number;
   onEvent?: (event: string, detail: string) => void;
 }
 
@@ -24,6 +26,8 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
     agentGateUrl = DEFAULT_CONFIG.agentGateUrl,
     apiKey = DEFAULT_CONFIG.apiKey,
     sizeChangeThreshold = DEFAULT_CONFIG.sizeChangeThreshold,
+    verifyCmd = DEFAULT_CONFIG.verifyCmd,
+    verifyCmdTimeoutMs = DEFAULT_CONFIG.verifyCmdTimeoutMs,
     onEvent,
   } = options;
 
@@ -121,7 +125,10 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
     const snapshotSize = getSnapshotSize(filePath);
     const actionId = await tryBondLifecycle(filePath, "modify");
 
-    const result = verifyChange(filePath, snapshotSize, sizeChangeThreshold);
+    // Use command-based verification if configured, otherwise fall back to size threshold
+    const result = verifyCmd
+      ? verifyCommand(verifyCmd, absoluteDir, verifyCmdTimeoutMs)
+      : verifyChange(filePath, snapshotSize, sizeChangeThreshold);
 
     if (result.passed) {
       await tryResolve(actionId, true);
