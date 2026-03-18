@@ -97,7 +97,8 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
       msg.includes("ECONNREFUSED") ||
       msg.includes("ENOTFOUND") ||
       msg.includes("timed out") ||
-      msg.includes("UND_ERR");
+      msg.includes("UND_ERR") ||
+      msg.includes("ETIMEDOUT");
   }
 
   async function tryBondLifecycle(filePath: string, action: string): Promise<BondResult> {
