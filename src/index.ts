@@ -100,6 +100,7 @@ async function main() {
   console.log(`  Watching:        ${absoluteDir}`);
   console.log(`  AgentGate:       ${agentGateUrl}`);
   console.log(`  Verification:    ${verifyCmd ? `command: ${verifyCmd} (${Math.round(verifyCmdTimeoutMs / 1000)}s timeout)` : `size threshold: ${Math.round(sizeChangeThreshold * 100)}%`}`);
+  console.log(`  On disconnect:   ${failOpen ? "fail-open (changes allowed through unverified)" : "fail-closed (changes reverted)"}`);
   console.log("");
 
   let handle: WatcherHandle | undefined;
