@@ -20,7 +20,11 @@ export function restoreSnapshot(filePath: string): void {
   if (!data) {
     throw new Error(`No snapshot exists for: ${absolute}`);
   }
-  fs.writeFileSync(absolute, data);
+  // Atomic restore: write to temp file, then rename into place.
+  // Same-directory temp file ensures rename is on the same filesystem.
+  const tmpPath = `${absolute}.tmp.restore`;
+  fs.writeFileSync(tmpPath, data);
+  fs.renameSync(tmpPath, absolute);
 }
 
 export function hasSnapshot(filePath: string): boolean {

@@ -38,6 +38,9 @@ describe("snapshots", () => {
     // Restore from snapshot
     restoreSnapshot(file);
     expect(fs.readFileSync(file, "utf8")).toBe("original content");
+
+    // Atomic restore: temp file should not persist
+    expect(fs.existsSync(`${file}.tmp.restore`)).toBe(false);
   });
 
   it("getSnapshotSize returns correct byte size", () => {
@@ -113,6 +116,9 @@ describe("snapshots", () => {
 
     restoreSnapshot(file);
     expect(fs.readFileSync(file)).toEqual(buf);
+
+    // Atomic restore: temp file should not persist
+    expect(fs.existsSync(`${file}.tmp.restore`)).toBe(false);
   });
 
   it("takeSnapshot throws on symlinks", () => {
