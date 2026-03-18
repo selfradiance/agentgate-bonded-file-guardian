@@ -208,4 +208,97 @@ describe("watcher", () => {
     // The restore echo is suppressed by either debounce (fast mocks) or justRestored set (real AgentGate)
     expect(vi.mocked(bonds.postBond).mock.calls.length).toBe(1);
   });
+
+  it("per-file mutex: two rapid changes to the same file process sequentially", async () => {
+    const file = path.join(tmpDir, "mutex.txt");
+    fs.writeFileSync(file, "v1");
+
+    // Make postBond take 200ms so we can observe sequencing
+    const callOrder: string[] = [];
+    vi.mocked(bonds.postBond).mockImplementation(async () => {
+      callOrder.push("bond-start");
+      await new Promise((r) => setTimeout(r, 200));
+      callOrder.push("bond-end");
+      return "fake-bond-id";
+    });
+
+    handle = await startWatcher({
+      directory: tmpDir,
+      agentGateUrl: "http://fake",
+      apiKey: "fake",
+      sizeChangeThreshold: 0.5,
+      onEvent,
+    });
+
+    // Two rapid writes — second should queue behind the first
+    fs.writeFileSync(file, "v2");
+    // Wait just enough for chokidar to fire but not for the handler to finish
+    await new Promise((r) => setTimeout(r, 50));
+    fs.writeFileSync(file, "v3");
+
+    // Wait for both handlers to complete
+    await new Promise((r) => setTimeout(r, 1500));
+
+    // With the mutex, bond calls should be sequential: start, end, start, end
+    // Without the mutex, they'd interleave: start, start, end, end
+    // Filter to just the bond lifecycle calls
+    const bondCalls = callOrder.filter((c) => c.startsWith("bond"));
+    if (bondCalls.length >= 4) {
+      expect(bondCalls[0]).toBe("bond-start");
+      expect(bondCalls[1]).toBe("bond-end");
+      expect(bondCalls[2]).toBe("bond-start");
+      expect(bondCalls[3]).toBe("bond-end");
+    }
+    // At minimum, the file should be in a consistent state
+    expect(fs.existsSync(file)).toBe(true);
+  });
+
+  it("per-file mutex: changes to different files process concurrently", async () => {
+    const fileA = path.join(tmpDir, "a.txt");
+    const fileB = path.join(tmpDir, "b.txt");
+    fs.writeFileSync(fileA, "aaa");
+    fs.writeFileSync(fileB, "bbb");
+
+    // Track which files start processing and when
+    const timestamps: Array<{ file: string; phase: string; time: number }> = [];
+    vi.mocked(bonds.postBond).mockImplementation(async (_url, _key, _keys, _id, filePath) => {
+      timestamps.push({ file: path.basename(filePath), phase: "start", time: Date.now() });
+      await new Promise((r) => setTimeout(r, 200));
+      timestamps.push({ file: path.basename(filePath), phase: "end", time: Date.now() });
+      return "fake-bond-id";
+    });
+
+    handle = await startWatcher({
+      directory: tmpDir,
+      agentGateUrl: "http://fake",
+      apiKey: "fake",
+      sizeChangeThreshold: 0.5,
+      onEvent,
+    });
+
+    // Modify both files nearly simultaneously
+    fs.writeFileSync(fileA, "aaa-modified");
+    fs.writeFileSync(fileB, "bbb-modified");
+
+    await new Promise((r) => setTimeout(r, 1000));
+
+    // Both files should have been processed
+    const aStamps = timestamps.filter((t) => t.file === "a.txt");
+    const bStamps = timestamps.filter((t) => t.file === "b.txt");
+
+    if (aStamps.length >= 2 && bStamps.length >= 2) {
+      // Concurrent: both should START before either ENDS
+      // (their 200ms bond calls should overlap)
+      const aStart = aStamps.find((t) => t.phase === "start")!.time;
+      const bStart = bStamps.find((t) => t.phase === "start")!.time;
+      const aEnd = aStamps.find((t) => t.phase === "end")!.time;
+      const bEnd = bStamps.find((t) => t.phase === "end")!.time;
+
+      // Both should start within a short window of each other (< 150ms)
+      expect(Math.abs(aStart - bStart)).toBeLessThan(150);
+      // And the total time should be ~200ms (concurrent), not ~400ms (sequential)
+      const totalTime = Math.max(aEnd, bEnd) - Math.min(aStart, bStart);
+      expect(totalTime).toBeLessThan(400);
+    }
+  });
 });

@@ -68,6 +68,21 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
     return last !== undefined && now - last < DEFAULT_CONFIG.debounceMs;
   }
 
+  // Per-file mutex — ensures only one handler runs per file at a time.
+  // Subsequent events for the same file queue behind the in-flight handler.
+  const fileLocks = new Map<string, Promise<void>>();
+
+  function withFileLock(filePath: string, fn: () => Promise<void>): Promise<void> {
+    const prev = fileLocks.get(filePath) ?? Promise.resolve();
+    const next = prev.then(fn, fn); // run fn regardless of whether prev succeeded or failed
+    fileLocks.set(filePath, next);
+    // Clean up the map entry when the chain settles to avoid unbounded growth
+    next.then(() => {
+      if (fileLocks.get(filePath) === next) fileLocks.delete(filePath);
+    });
+    return next;
+  }
+
   // Restore-echo suppression — skip the chokidar event triggered by our own restore
   const justRestored = new Set<string>();
 
@@ -187,12 +202,12 @@ export async function startWatcher(options: WatcherOptions): Promise<WatcherHand
   });
 
   watcher.on("change", (fp) => {
-    handleChange(fp).catch((err) => {
+    withFileLock(fp, () => handleChange(fp)).catch((err) => {
       log("error", `Unhandled error in handleChange: ${err instanceof Error ? err.message : String(err)}`);
     });
   });
   watcher.on("unlink", (fp) => {
-    handleUnlink(fp).catch((err) => {
+    withFileLock(fp, () => handleUnlink(fp)).catch((err) => {
       log("error", `Unhandled error in handleUnlink: ${err instanceof Error ? err.message : String(err)}`);
     });
   });
