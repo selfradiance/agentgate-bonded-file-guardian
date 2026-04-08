@@ -1,130 +1,74 @@
 # Agent 002: File Guardian
 
-A rollback-enforcing file watcher for AI-assisted coding that adds bond/slash accountability through [AgentGate](https://github.com/selfradiance/agentgate).
+A bonded file guardian that watches a directory, intercepts modifications and deletions, verifies changes via configurable commands, and slashes the bond if verification fails — restoring the file from a pre-change snapshot.
 
-When an AI coding agent (or anything else) modifies or deletes a file, the guardian posts a bond, verifies the change, and either releases the bond or slashes it and restores the file from a snapshot. The guardian process posts the bond on behalf of whatever agent made the file change — the agent itself is not aware of the bond. The guardian is an independent enforcement layer that watches the directory and attaches accountability after the fact, using its own Ed25519 keypair as its identity.
+## Why This Exists
 
-## Why
+AI coding agents modify files constantly. If a change breaks something, the cost falls entirely on you. Agent 002 puts the agent's bond on the line: every file change triggers a verification step, and failure means the bond is slashed and the file is restored to its pre-change state.
 
-AI coding agents are being given filesystem access with zero accountability. A developer recently lost 2.5 years of production data when an AI agent executed a single destructive command. Rate limits and permission systems don't help when the agent has legitimate access — the problem is that nothing makes the agent economically accountable for what it does with that access. This project exists so that destructive file changes can't happen silently.
+This is the second agent in the AgentGate ecosystem. It proves command-based verification — you choose what "pass" means by supplying your own verification command.
 
-## Why Not Git / Hooks / CI?
+## How It Relates to AgentGate
 
-**"Why not just use git?"** — Git tracks history after the fact. It doesn't create an automatic gate or consequence at the moment a file is mutated. The guardian acts at the point of change — detecting, verifying, and reverting before the next command runs — not after a review cycle.
+[AgentGate](https://github.com/selfradiance/agentgate) is the enforcement substrate. Agent 002 calls AgentGate's API to register an identity, lock a bond per file change, execute a bonded action, and resolve based on the verification result. AgentGate handles bonding and settlement. Agent 002 handles watching, snapshotting, verifying, and restoring.
 
-**"Why not pre-commit hooks or watch-mode tests?"** — Those run verification but don't revert on failure or attach an economic record. The guardian combines verification, automatic rollback, and bond/slash accountability in a single loop. A hook can tell you something broke; the guardian fixes it and records who paid.
+AgentGate must be running for Agent 002 to work.
 
-**"Why not sandbox the agent?"** — Valid for some setups, but many real workflows grant agents legitimate write access to working directories (Claude Code, Cursor, Copilot Workspace). This is a runtime enforcement layer for environments where the agent already has access and you want accountability, not restriction.
+## What's Implemented
 
-## How It Works
-
-1. The guardian starts and snapshots every file in the watched directory (non-recursive — files present at startup only, by design for v0.2.0)
-2. A file change is detected (modification or deletion)
-3. A bond is posted to AgentGate (the guardian puts up collateral on behalf of the agent)
-4. Verification runs: either a user-supplied command (`--verify-cmd`, exit 0 = pass) or the default size-threshold check (file exists, not empty, size within threshold)
-5. If verification passes → bond released, snapshot updated to the new file state
-6. If verification fails → bond slashed, file restored from the pre-change snapshot
+- Background process watching a single directory via chokidar
+- Pre-change snapshots (binary-safe)
+- Configurable command-based verification (`--verify-cmd "tsc --noEmit"`)
+- Atomic restores (write-to-temp + rename)
+- Per-file locking (promise-chain mutex — no concurrent bond calls for the same file)
+- Fail-closed default when AgentGate is unreachable (`--fail-open` to override)
+- Full AgentGate lifecycle per file change: snapshot → bond → verify → resolve → restore if failed
+- Ed25519 signed requests
+- Configurable verification timeout (`--verify-timeout`)
+- GitHub Actions CI
 
 ## Quick Start
 
-**Prerequisites:** Node.js 20+, a running [AgentGate](https://github.com/selfradiance/agentgate) instance.
-
 ```bash
-# Clone and install
-git clone https://github.com/selfradiance/agent-002-file-guardian.git
-cd agent-002-file-guardian
+# 1. Start AgentGate
+cd ~/Desktop/projects/agentgate && npm run restart
+
+# 2. Run Agent 002
+cd ~/Desktop/projects/agent-002-file-guardian
+cp .env.example .env  # add your AGENTGATE_REST_KEY
 npm install
-
-# Watch a TypeScript project — restore any change that breaks the build
-npx tsx src/index.ts ./src --verify-cmd 'tsc --noEmit' --api-key YOUR_AGENTGATE_REST_KEY
-
-# Watch a Python project — restore any change that breaks tests
-npx tsx src/index.ts ./src --verify-cmd 'python -m pytest tests/' --api-key YOUR_AGENTGATE_REST_KEY
-
-# Bare-minimum fallback: default size-threshold verification (no verify command)
-npx tsx src/index.ts /path/to/directory --api-key YOUR_AGENTGATE_REST_KEY
+npx tsx src/cli.ts ./watched-directory --verify-cmd "tsc --noEmit"
 ```
 
-The `--verify-cmd` flag is the primary way to use the guardian. The default size-threshold verifier (file exists, not empty, size within threshold) is a bare-minimum fallback for cases where no verification command is available.
+## Example
 
-**Options:**
+An AI coding agent modifies `src/index.ts` in the watched directory. Agent 002 detects the change, takes a snapshot, posts a bond on AgentGate, runs `tsc --noEmit`. If TypeScript compilation passes, the bond is released. If it fails, the bond is slashed and the file is restored from the snapshot.
 
-```
-npx tsx src/index.ts <directory> [options]
+## Scope / Non-Goals
 
-  --agentgate-url <url>   AgentGate server URL (default: http://127.0.0.1:3000)
-  --api-key <key>         AgentGate REST key (or set AGENTGATE_REST_KEY env var)
-  --threshold <percent>   Max allowed size change % (default: 50)
-  --verify-cmd <command>  Shell command to run for verification (exit 0 = pass)
-  --verify-timeout <sec>  Timeout for verify command in seconds (default: 30)
-  --fail-open             Allow changes through when AgentGate is unreachable (default: fail-closed)
-```
-
-The `--agentgate-url` flag also accepts `https://agentgate.run` — a live demo instance available until approximately March 2027.
-
-## What Happens When a Change Is Caught
-
-```
-[14:32:01] [change] Change detected: db.ts
-[14:32:01] [error]  Bond lifecycle failed for db.ts: fetch failed: ECONNREFUSED
-[14:32:01] [failed] db.ts: AgentGate unreachable — change reverted (fail-closed)
-```
-
-```
-[14:35:12] [change] Change detected: config.ts
-[14:35:14] [failed] config.ts: Command failed (exit 1): tsc --noEmit — error TS2322: Type 'string' is not assignable to type 'number'. — restored from snapshot
-```
-
-```
-[14:36:44] [change] Change detected: utils.ts
-[14:36:46] [passed] utils.ts: Command passed: tsc --noEmit
-```
-
-## Scope (v0.2.0)
-
-This is a deliberately scoped proof-of-concept:
-
-- **Watches a single directory** (non-recursive) — files present at startup are monitored
-- **Does not watch new files** created after startup, subdirectories, or nested paths
-- **One verification command** applies to all file changes (no per-file rules)
-
-This scope is intentional. Agent 002 proves that the bond/verify/rollback loop works with real verification commands. Recursive watching, per-file rules, and multi-directory support are straightforward extensions but outside the scope of the proof-of-concept.
-
-## Safety Features
-
-- **Fail-closed by default** — if AgentGate is unreachable, changes are reverted from snapshot. Use `--fail-open` to override.
-- **Symlinks skipped** — symlinks in the watched directory are detected and ignored, preventing the guardian from reading or writing outside the directory
-- **Restore-echo suppression** — when the guardian restores a file, the resulting filesystem event is suppressed so it doesn't waste a bond re-checking its own restore
-- **Atomic restores** — restored files are written to a temp file first, then atomically renamed into place. A crash mid-restore won't corrupt the original.
-- **Per-file locking** — concurrent changes to the same file are serialized, preventing race conditions in the bond/verify/restore cycle
-- **10-second request timeout** — all AgentGate API calls time out after 10 seconds, so the guardian doesn't hang if AgentGate is unreachable
-- **Input validation** — invalid CLI values (NaN thresholds, bad timeout values) are rejected at startup with clear errors
-
-## Trust Model
-
-The `--verify-cmd` flag runs an arbitrary shell command via `/bin/sh`. This is a deliberate design choice — the guardian's operator specifies the command, and it runs with the same permissions as the guardian process. Do not source the `--verify-cmd` value from untrusted input (e.g., user-facing config files or environment variables set by other processes). The trust boundary is the same as a `Makefile` target or an npm script.
-
-## Known Issues
-
-- **Do not pass secrets inline in `--verify-cmd`.** The guardian logs the full command string in the startup banner and in verification failure messages (including stderr output). If you embed tokens, passwords, or secret URLs directly in the command, they will appear in logs. Use environment variables or config files instead — e.g., `--verify-cmd './run-tests.sh'` where the script reads secrets from the environment, not `--verify-cmd 'curl -H "Authorization: Bearer sk-..."'`.
+- Single directory only — no recursive watching (v0.3.0 candidate)
+- New identity every run — no persistence
+- `execSync` blocks during verification — acceptable for v0.2.0
+- Orphaned bonds possible if execution fails after bond posting (AgentGate sweeper handles via TTL)
+- No MCP server — standalone background process
 
 ## Tests
+
+50 tests (44 pass, 6 skipped for missing AgentGate). Covers snapshot integrity, watcher reliability, bond integration, verification logic, configuration validation, error handling, and edge cases.
 
 ```bash
 npm test
 ```
 
-50 tests across 5 test files (snapshots, verification, bonds, watcher, integration).
+## Related Projects
 
-Integration tests require a running AgentGate instance:
+- [AgentGate](https://github.com/selfradiance/agentgate) — the core execution engine
+- [Agent 001: Bonded File Transform](https://github.com/selfradiance/agentgate-bonded-file-transform) — deterministic verification
+- [Agent 003: Email Rewriter](https://github.com/selfradiance/agentgate-bonded-email-rewriter) — human judgment in the loop
 
-```bash
-AGENTGATE_URL=http://127.0.0.1:3000 AGENTGATE_REST_KEY=yourkey npm test
-```
+## Status
 
-## Built On
-
-- [AgentGate](https://github.com/selfradiance/agentgate) — the bond-and-slash accountability layer for AI agents
+Complete — v0.2.0 shipped. Triple-audited (Claude Code 8-round × 2 versions + Codex cold-eyes). 50 tests.
 
 ## License
 
